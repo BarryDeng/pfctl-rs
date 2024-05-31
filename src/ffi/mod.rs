@@ -13,6 +13,7 @@ use ioctl_sys::ioctl;
 #[allow(non_snake_case)]
 #[allow(dead_code)]
 pub mod pfvar;
+pub mod pfvar_ext;
 
 pub mod tcp {
     use std::os::raw::c_uint;
@@ -63,3 +64,4 @@ ioctl!(readwrite pf_add_addr with b'D', 52; pfvar::pfioc_pooladdr);
 ioctl!(readwrite pf_begin_trans with b'D', 81; pfvar::pfioc_trans);
 // DIOCXCOMMIT
 ioctl!(readwrite pf_commit_trans with b'D', 82; pfvar::pfioc_trans);
+

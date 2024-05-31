@@ -145,7 +145,7 @@ impl TryFrom<u8> for PFTM {
 
 fn get_addr_str(addr: &pf_addr) -> String {
     unsafe { // Unsafe due to accessing union data
-        let ip = Ipv4Addr::from(u32::from_be(addr.pfa.v4.s_addr)); // Assuming big-endian for example
+        let ip = Ipv4Addr::from(u32::from_be(addr.pfa._v4addr.s_addr)); // Assuming big-endian for example
         return ip.to_string();
     }
 }
