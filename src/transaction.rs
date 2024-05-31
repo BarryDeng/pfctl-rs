@@ -7,8 +7,7 @@
 // except according to those terms.
 
 use crate::{
-    conversion::TryCopyTo, ffi, utils, ErrorKind, FilterRule, PoolAddrList, RedirectRule, Result,
-    ResultExt, RulesetKind,
+    conversion::TryCopyTo, ffi, utils, ErrorKind, FilterRule, NatRule, PoolAddrList, RedirectRule, Result, ResultExt, RulesetKind
 };
 use std::{
     collections::HashMap,
@@ -70,6 +69,16 @@ impl Transaction {
                     .map(|rules| (anchor.clone(), rules))
             })
             .collect();
+        let nat_changes: Vec<(String, Vec<NatRule>)> = self
+            .change_by_anchor
+            .iter_mut()
+            .filter_map(|(anchor, change)| {
+                change
+                    .nat_rules
+                    .take()
+                    .map(|rules| (anchor.clone(), rules))
+            })
+            .collect();
 
         // create one transaction element for each unique combination of anchor name and
         // `RulesetKind` and order them so elements for filter rules go first followed by redirect
@@ -106,6 +115,15 @@ impl Transaction {
         {
             for redirect_rule in redirect_rules.iter() {
                 Self::add_redirect_rule(fd, &anchor_name, redirect_rule, ticket)?;
+            }
+        }
+
+        // add nat rules into transaction
+        for ((anchor_name, nat_rules), ticket) in
+            nat_changes.into_iter().zip(ticket_iterator.by_ref())
+        {
+            for nat_rule in nat_rules.iter() {
+                Self::add_nat_rule(fd, &anchor_name, nat_rule, ticket)?;
             }
         }
 
@@ -174,6 +192,33 @@ impl Transaction {
         ioctl_guard!(ffi::pf_add_rule(fd, &mut pfioc_rule))
     }
 
+    /// Internal helper to add redirect rule into transaction
+    fn add_nat_rule(fd: RawFd, anchor: &str, rule: &NatRule, ticket: u32) -> Result<()> {
+        // prepare pfioc_rule
+        let mut pfioc_rule = unsafe { mem::zeroed::<ffi::pfvar::pfioc_rule>() };
+        anchor
+            .try_copy_to(&mut pfioc_rule.anchor[..])
+            .chain_err(|| ErrorKind::InvalidArgument("Invalid anchor name"))?;
+        rule.try_copy_to(&mut pfioc_rule.rule)?;
+
+        // register redirect address in newly created address pool
+        let nat_to = rule.get_nat_to();
+        let pool_ticket = utils::get_pool_ticket(fd)?;
+        utils::add_pool_address(fd, nat_to.ip(), pool_ticket)?;
+
+        // copy address pool in pf_rule
+        let redirect_pool = nat_to.ip().to_pool_addr_list()?;
+        pfioc_rule.rule.rpool.list = unsafe { redirect_pool.to_palist() };
+        nat_to.port().try_copy_to(&mut pfioc_rule.rule.rpool)?;
+
+        // set tickets
+        pfioc_rule.pool_ticket = pool_ticket;
+        pfioc_rule.ticket = ticket;
+
+        // add rule into transaction
+        ioctl_guard!(ffi::pf_add_rule(fd, &mut pfioc_rule))
+    }
+
     /// Internal helper to wire up pfioc_trans and pfioc_trans_e
     fn setup_trans(
         pfioc_trans: &mut ffi::pfvar::pfioc_trans,
@@ -206,6 +251,7 @@ impl Transaction {
 pub struct AnchorChange {
     filter_rules: Option<Vec<FilterRule>>,
     redirect_rules: Option<Vec<RedirectRule>>,
+    nat_rules: Option<Vec<NatRule>>,
 }
 
 impl Default for AnchorChange {
@@ -220,6 +266,7 @@ impl AnchorChange {
         AnchorChange {
             filter_rules: None,
             redirect_rules: None,
+            nat_rules: None,
         }
     }
 
@@ -229,5 +276,9 @@ impl AnchorChange {
 
     pub fn set_redirect_rules(&mut self, rules: Vec<RedirectRule>) {
         self.redirect_rules = Some(rules);
+    }
+
+    pub fn set_nat_rules(&mut self, rules: Vec<NatRule>) {
+        self.nat_rules = Some(rules);
     }
 }

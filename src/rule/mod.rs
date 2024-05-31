@@ -239,6 +239,84 @@ impl TryCopyTo<ffi::pfvar::pf_rule> for RedirectRule {
     }
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Builder)]
+#[builder(setter(into))]
+#[builder(build_fn(name = "build_internal"))]
+pub struct NatRule {
+    action: NatRuleAction,
+    #[builder(default)]
+    direction: Direction,
+    #[builder(default)]
+    quick: bool,
+    #[builder(default)]
+    log: RuleLogSet,
+    #[builder(default)]
+    interface: Interface,
+    #[builder(default)]
+    proto: Proto,
+    #[builder(default)]
+    af: AddrFamily,
+    #[builder(default)]
+    from: Endpoint,
+    #[builder(default)]
+    to: Endpoint,
+    #[builder(default)]
+    label: String,
+    #[builder(default)]
+    user: Uid,
+    #[builder(default)]
+    group: Gid,
+    nat_to: Endpoint,
+    #[builder(default)]
+    pass: bool,
+}
+
+impl NatRuleBuilder {
+    pub fn build(&self) -> Result<NatRule> {
+        self.build_internal()
+            .map_err(|e| ErrorKind::InvalidRuleCombination(e).into())
+    }
+}
+
+impl NatRule {
+    /// Returns the `AddrFamily` this rule matches against. Returns an `InvalidRuleCombination`
+    /// error if this rule has an invalid combination of address families.
+    fn get_af(&self) -> Result<AddrFamily> {
+        let endpoint_af = compatible_af(self.from.get_af(), self.to.get_af())?;
+        let nat_af = compatible_af(endpoint_af, self.nat_to.get_af())?;
+        compatible_af(self.af, nat_af)
+    }
+
+    /// Accessor for `nat_to`
+    pub fn get_nat_to(&self) -> Endpoint {
+        self.nat_to
+    }
+}
+
+impl TryCopyTo<ffi::pfvar::pf_rule> for NatRule {
+    fn try_copy_to(&self, pf_rule: &mut ffi::pfvar::pf_rule) -> Result<()> {
+        pf_rule.action = self.action.into();
+        pf_rule.direction = self.direction.into();
+        pf_rule.quick = self.quick as u8;
+        pf_rule.log = (&self.log).into();
+        self.interface
+            .try_copy_to(&mut pf_rule.ifname)
+            .chain_err(|| ErrorKind::InvalidArgument("Incompatible interface name"))?;
+        pf_rule.proto = self.proto.into();
+        pf_rule.af = self.get_af()?.into();
+        pf_rule.natpass = self.pass as u8;
+
+        self.from.try_copy_to(&mut pf_rule.src)?;
+        self.to.try_copy_to(&mut pf_rule.dst)?;
+        self.label.try_copy_to(&mut pf_rule.label)?;
+        self.user.try_copy_to(&mut pf_rule.uid)?;
+        self.group.try_copy_to(&mut pf_rule.gid)?;
+
+        Ok(())
+    }
+}
+
 fn compatible_af(af1: AddrFamily, af2: AddrFamily) -> Result<AddrFamily> {
     match (af1, af2) {
         (af1, af2) if af1 == af2 => Ok(af1),

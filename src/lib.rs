@@ -69,9 +69,12 @@ use std::{
     os::unix::io::{AsRawFd, RawFd},
 };
 
+use std::os::raw::c_char;
+use std::ffi::CString;
+
 pub use ipnetwork;
 
-mod ffi;
+pub mod ffi;
 
 #[macro_use]
 mod macros;
@@ -274,12 +277,38 @@ impl PfCtl {
         ioctl_guard!(ffi::pf_change_rule(self.fd(), &mut pfioc_rule))
     }
 
+    pub fn add_nat_rule(&mut self, anchor: &str, rule: &NatRule) -> Result<()> {
+        // prepare pfioc_rule
+        let mut pfioc_rule = unsafe { mem::zeroed::<ffi::pfvar::pfioc_rule>() };
+        anchor.try_copy_to(&mut pfioc_rule.anchor[..])?;
+        rule.try_copy_to(&mut pfioc_rule.rule)?;
+
+        // register nat address in newly created address pool
+        let nat_to = rule.get_nat_to();
+        let pool_ticket = utils::get_pool_ticket(self.fd())?;
+        utils::add_pool_address(self.fd(), nat_to.ip(), pool_ticket)?;
+
+        // copy address pool in pf_rule
+        let nat_pool = nat_to.ip().to_pool_addr_list()?;
+        pfioc_rule.rule.rpool.list = unsafe { nat_pool.to_palist() };
+        nat_to.port().try_copy_to(&mut pfioc_rule.rule.rpool)?;
+
+        // set tickets
+        pfioc_rule.pool_ticket = pool_ticket;
+        pfioc_rule.ticket = utils::get_ticket(self.fd(), anchor, AnchorKind::Nat)?;
+
+        // append rule
+        pfioc_rule.action = ffi::pfvar::PF_CHANGE_ADD_TAIL as u32;
+        ioctl_guard!(ffi::pf_change_rule(self.fd(), &mut pfioc_rule))
+    }
+
     pub fn flush_rules(&mut self, anchor: &str, kind: RulesetKind) -> Result<()> {
         let mut trans = Transaction::new();
         let mut anchor_change = AnchorChange::new();
         match kind {
             RulesetKind::Filter => anchor_change.set_filter_rules(Vec::new()),
             RulesetKind::Redirect => anchor_change.set_redirect_rules(Vec::new()),
+            RulesetKind::Nat => anchor_change.set_nat_rules(Vec::new()),
         };
         trans.add_change(anchor, anchor_change);
         trans.commit()
@@ -324,7 +353,7 @@ impl PfCtl {
     }
 
     /// Get all states created by stateful rules
-    fn get_states(&mut self) -> Result<Vec<ffi::pfvar::pfsync_state>> {
+    pub fn get_states(&mut self) -> Result<Vec<ffi::pfvar::pfsync_state>> {
         let num_states = self.get_num_states()?;
         if num_states > 0 {
             let (mut pfioc_states, pfsync_states) = setup_pfioc_states(num_states);
@@ -407,6 +436,24 @@ fn setup_pfioc_state_kill(
     pfioc_state_kill.psk_dst.addr.v.a.addr = pfsync_state.ext_lan.addr;
 }
 
+#[no_mangle]
+pub extern fn rust_greeting(to: *const c_char) -> *mut c_char {
+    let c_str = unsafe { CStr::from_ptr(to) };
+    let recipient = match c_str.to_str() {
+        Err(_) => "there",
+        Ok(string) => string,
+    };
+
+    CString::new("Hello ".to_owned() + recipient).unwrap().into_raw()
+}
+
+#[no_mangle]
+pub extern fn rust_greeting_free(s: *mut c_char) {
+    unsafe {
+        if s.is_null() { return }
+        CString::from_raw(s)
+    };
+}
 #[cfg(test)]
 mod tests {
     use super::*;

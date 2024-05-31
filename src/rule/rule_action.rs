@@ -73,3 +73,28 @@ impl From<RedirectRuleAction> for u8 {
         }
     }
 }
+
+
+/// Enum describing what should happen to a packet that matches a nat rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NatRuleAction {
+    NAT,
+    NoNAT,
+    BiNAT,
+    NoBiNAT,
+    NAT64,
+    NoNAT64,
+}
+
+impl From<NatRuleAction> for u8 {
+    fn from(rule_action: NatRuleAction) -> Self {
+        match rule_action {
+            NatRuleAction::NAT => ffi::pfvar::PF_NAT as u8,
+            NatRuleAction::NoNAT => ffi::pfvar::PF_NONAT as u8,
+            NatRuleAction::BiNAT => ffi::pfvar::PF_BINAT as u8,
+            NatRuleAction::NoBiNAT => ffi::pfvar::PF_NOBINAT as u8,
+            NatRuleAction::NAT64 => ffi::pfvar::PF_NAT64 as u8,
+            NatRuleAction::NoNAT64 => ffi::pfvar::PF_NONAT64 as u8,
+        }
+    }
+}

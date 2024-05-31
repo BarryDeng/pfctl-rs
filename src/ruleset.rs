@@ -13,6 +13,7 @@ use crate::ffi;
 pub enum RulesetKind {
     Filter,
     Redirect,
+    Nat,
 }
 
 impl From<RulesetKind> for i32 {
@@ -20,6 +21,7 @@ impl From<RulesetKind> for i32 {
         match ruleset_kind {
             RulesetKind::Filter => ffi::pfvar::PF_RULESET_FILTER as i32,
             RulesetKind::Redirect => ffi::pfvar::PF_RULESET_RDR as i32,
+            RulesetKind::Nat => ffi::pfvar::PF_RULESET_NAT as i32,
         }
     }
 }
